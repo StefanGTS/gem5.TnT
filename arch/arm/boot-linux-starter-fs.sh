@@ -31,6 +31,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Author: Éder F. Zulian
+set -x
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TOPDIR=$DIR/../..
@@ -70,7 +71,7 @@ Boot Linux aarch64. Optionally, a DISK image can be specified.
 	CPU_TYPE for running benchmarks: minor or hpi"
 
 if [ "$#" = "0" ]; then
-	img="$imgdir/linaro-minimal-aarch64-arm64-inside.img"
+	img="$imgdir/linaro-minimal-aarch64.img"
 	#cpu_type="hpi"
 	#cpu_type="atomic"
 	cpu_type="minor"
@@ -129,11 +130,23 @@ kernel="${syspath}/binaries/vmlinux.vexpress_gem5_v1_64"
 kernel_opts="--kernel=${kernel}"
 dtb_opts="--dtb=${syspath}/binaries/armv8_gem5_v1_${ncpus}cpu.dtb"
 gem5_opts="--remote-gdb-port=0"
-#tlm_opts="--tlm-memory=transactor"
+tlm_opts="--tlm-memory=transactor"
+
+if [ -z ${tlm_opts+x} ]; then
+	echo "TLM option disabled"
+	exit 1
+else
+	echo "TLM option enabled"
+	pushd $ROOTDIR/gem5
+	git checkout configs/example/arm/starter_fs.py
+	patch -p1 < $DIR/starter_fs-tlm.patch
+	popd
+	exit 1
+fi
 
 sim_name="${target}-${cpu_type}-${ncpus}c-${mem_size}-${currtime}"
 
-pushd $ROOTDIR/gem5
+
 if [[ ! -e $gem5_elf ]]; then
 	$TOPDIR/build_gem5.sh
 fi
