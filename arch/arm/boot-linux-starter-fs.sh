@@ -46,23 +46,68 @@ sysver="20180409"
 syspath="$FSDIRARM/aarch-system-${sysver}"
 imgdir="${syspath}/disks"
 
-usage="Usage: $(basename "$0") {-h | [DISK]}
+usage="Usage: $(basename "$0") {-h | [DISK NUM_CPUS MEM_SIZE_GB [BENCHMARK [CPU_TYPE]]]}
 Boot Linux aarch64. Optionally, a DISK image can be specified.
 	-h    display this help and exit
-	DISK  raw disk image file (.img)"
+	DISK  raw disk image file (.img)
+	NUM_CPUS  number of CPUS
+	MEM_SIZE_GB memory size in GiB
+	BENCHMARK
+			lat_mem_rd <SIZE_MB> <STRIDE1_SIZE_B> [stride2 in byte]…
 
-if [ "$1" = "-h" ]; then
+			sysbench [--num-threads=<num-threads>] --test=memory --memory-block-size=[in MB] --memory-total-size=[in MB] run
+
+			bw_mem [size in byte optional + K or M] [benchmark option:	rd
+											wr
+											rdwr
+											cp
+											fwr
+											frd
+											fcp
+											bzero
+											memcpy]
+
+	CPU_TYPE for running benchmarks: minor or hpi"
+
+if [ "$#" = "0" ]; then
+	img="$imgdir/linaro-minimal-aarch64-arm64-inside.img"
+	#cpu_type="hpi"
+	#cpu_type="atomic"
+	cpu_type="minor"
+	ncpus="2"
+	mem_size="4GB"
+	
+elif [ "$#" = "1" ] && [ "$1" = "-h" ]; then
 	echo "$usage"
 	exit 0
-fi
 
-if [ "$#" = "1" ]; then
+elif [ "$#" = "3" ]; then
 	img="$1"
+	#cpu_type="hpi"
+	#cpu_type="atomic"
+	cpu_type="minor"
+	ncpus="$2"
+	mem_size="${3}GB"
+
+elif [ "$#" = "4" ]; then
+	img="$1"
+	#cpu_type="hpi"
+	#cpu_type="atomic"
+	cpu_type="minor"
+	ncpus="$2"
+	mem_size="${3}GB"
+	cmd="$4"
+
+elif [ "$#" = "5" ]; then
+	img="$1"
+	ncpus="$2"
+	mem_size="${3}GB"
+	cmd="$4"
+	cpu_type="$5"
+
 else
-	img="$imgdir/linaro-minimal-aarch64.img"
-	if [[ ! -e $img ]]; then
-		$TOPDIR/get_essential_fs.sh
-	fi
+	echo "$usage"
+	exit 1
 fi
 
 if [ ! -e "$img" ]; then
@@ -71,23 +116,20 @@ if [ ! -e "$img" ]; then
 	exit 1
 fi
 
+
 disk_opts="--disk-image=$img"
 
 target="boot-lin-starter-fs"
 config_script="configs/example/arm/starter_fs.py"
-ncpus="2"
 
-#cpu_type="hpi"
-#cpu_type="atomic"
-cpu_type="minor"
 cpu_opts="--cpu=${cpu_type} --num-cores=$ncpus"
-mem_size="8GB"
 mem_opts="--mem-size=${mem_size}"
 
 kernel="${syspath}/binaries/vmlinux.vexpress_gem5_v1_64"
 kernel_opts="--kernel=${kernel}"
 dtb_opts="--dtb=${syspath}/binaries/armv8_gem5_v1_${ncpus}cpu.dtb"
 gem5_opts="--remote-gdb-port=0"
+#tlm_opts="--tlm-memory=transactor"
 
 sim_name="${target}-${cpu_type}-${ncpus}c-${mem_size}-${currtime}"
 
@@ -101,7 +143,22 @@ printf '#!/bin/bash\n' > $bootscript
 printf "echo \"Greetings from gem5.TnT!\"\n" >> $bootscript
 printf "echo \"Executing $bootscript now\"\n" >> $bootscript
 printf '/sbin/m5 -h\n' >> $bootscript
-printf '/bin/bash\n' >> $bootscript
+#for_bash
+if [ "$#" != "4" ] && [ "$#" != "5" ]; then
+	printf '/bin/bash\n' >> $bootscript
+else
+	#for_benchmark
+	printf "echo \"Command: ${cmd}\"\n" >> $bootscript
+	printf 'ls\n' >> $bootscript
+	printf 'cd arm64\n' >> $bootscript
+	printf "./${cmd}\n" >> $bootscript
+	printf "echo \"***********************\"\n" >> $bootscript
+	printf "dmesg\n" >> $bootscript
+	printf 'sleep 1\n' >> $bootscript
+	printf '/sbin/m5 exit \n' >> $bootscript
+fi
+
+
 script_opt="--script=$ROOTDIR/gem5/$bootscript"
 
 output_dir="${sim_name}"
@@ -120,5 +177,8 @@ time $gem5_elf $gem5_opts \
 	$dtb_opts \
 	$disk_opts \
 	$script_opt 2>&1 | tee $logfile
+
+echo "***********************" >> $logfile
+echo ${cmd} >> $logfile
 
 popd

@@ -46,25 +46,47 @@ sysver="20180409"
 syspath="$FSDIRARM/aarch-system-${sysver}"
 imgdir="${syspath}/disks"
 
-usage="Usage: $(basename "$0") {-h | [DISK NUM_CPUS MEM_SIZE_GB]}
+usage="Usage: $(basename "$0") {-h | [DISK NNUM_CPUS MEM_SIZE_GB [BENCHMARK]]}
 Boot Linux aarch64. Optionally the DISK image and the number of CPUs and the memory
 size in GiB can be specified.
 	-h    display this help and exit
 	DISK  raw disk image file (.img)
 	NUM_CPUS  number of CPUS
-	MEM_SIZE_GB memory size in GiB"
+	MEM_SIZE_GB memory size in GiB
+	BENCHMARK
+			lat_mem_rd [size in MB][stride1 in byte] [stride2 in byte]…
+
+			sysbench --num-threads=[num-threads] --test=memory --memory-block-size=[in MB] --memory-total-size=[in MB] run
+
+			bw_mem [size in byte optional + K or M] [benchmark option:	rd
+											wr
+											rdwr
+											cp
+											fwr
+											frd
+											fcp
+											bzero
+											memcpy]"
 
 if [ "$#" = "0" ]; then
-	img="$imgdir/linaro-minimal-aarch64.img"
+	img="$imgdir/linaro-minimal-aarch64-arm64-inside.img"
 	ncpus="2"
 	mem_size="4GB"
+	
 elif [ "$#" = "1" ] && [ "$1" = "-h" ]; then
 	echo "$usage"
 	exit 0
+
 elif [ "$#" = "3" ]; then
 	img="$1"
 	ncpus="$2"
 	mem_size="${3}GB"
+
+elif [ "$#" = "4" ]; then
+	img="$1"
+	ncpus="$2"
+	mem_size="${3}GB"
+	cmd="$4"
 else
 	echo "$usage"
 	exit 1
@@ -80,6 +102,7 @@ disk_opts="--disk-image=$img"
 
 target="boot-linux-aarch64"
 config_script="configs/example/fs.py"
+
 cpu_clk="4GHz"
 machine_opts="--machine-type=VExpress_GEM5_V1"
 cpu_type="TimingSimpleCPU"
@@ -87,6 +110,7 @@ cpu_type="TimingSimpleCPU"
 cpu_opts="--cpu-type=${cpu_type} --num-cpu=$ncpus --cpu-clock=${cpu_clk}"
 mem_opts="--mem-size=${mem_size}"
 cache_opts="--caches --l2cache"
+
 #kernel="$ROOTDIR/gem5/vmlinux_aarch64"
 kernel="${syspath}/binaries/vmlinux.vexpress_gem5_v1_64"
 kernel_opts="--kernel=${kernel}"
@@ -106,7 +130,20 @@ printf '#!/bin/bash\n' > $bootscript
 printf "echo \"Greetings from gem5.TnT!\"\n" >> $bootscript
 printf "echo \"Executing $bootscript now\"\n" >> $bootscript
 printf '/sbin/m5 -h\n' >> $bootscript
-printf '/bin/bash\n' >> $bootscript
+#for_bash
+if [ "$#" != "4" ]; then
+	printf '/bin/bash\n' >> $bootscript
+else
+	#for_benchmark
+	printf "echo \"Command: ${cmd}\"\n" >> $bootscript
+	printf 'ls\n' >> $bootscript
+	printf 'cd arm64\n' >> $bootscript
+	printf "./${cmd}\n" >> $bootscript
+	printf "echo \"***********************\"\n" >> $bootscript
+	printf "dmesg\n" >> $bootscript
+	printf 'sleep 1\n' >> $bootscript
+	printf '/sbin/m5 exit \n' >> $bootscript
+fi
 script_opt="--script=$ROOTDIR/gem5/$bootscript"
 
 output_dir="${sim_name}"
@@ -119,6 +156,7 @@ export M5_PATH="${syspath}":${M5_PATH}
 time $gem5_elf $gem5_opts \
 	-d $output_dir \
 	$config_script \
+	${wa_opts} \
 	$machine_opts \
 	$cpu_opts \
 	$mem_opts \
@@ -128,5 +166,8 @@ time $gem5_elf $gem5_opts \
 	$dtb_opts \
 	$disk_opts \
 	$script_opt 2>&1 | tee $logfile
+
+echo "***********************" >> $logfile
+echo ${cmd} >> $logfile
 
 popd
